@@ -1,22 +1,15 @@
 // SPDX-FileCopyrightText: 2024 LiveKit, Inc.
 //
 // SPDX-License-Identifier: Apache-2.0
-import {
-  type JobContext,
-  WorkerOptions,
-  cli,
-  defineAgent,
-  multimodal,
-} from "@livekit/agents";
+import { type JobContext, WorkerOptions, cli, defineAgent, multimodal } from "@livekit/agents";
 import * as openai from "@livekit/agents-plugin-openai";
-import type {
-  LocalParticipant,
-  Participant,
-  TrackPublication,
-} from "@livekit/rtc-node";
+import type { LocalParticipant, Participant, TrackPublication } from "@livekit/rtc-node";
 import { RemoteParticipant, TrackSource } from "@livekit/rtc-node";
+import dotenv from "dotenv";
 import { fileURLToPath } from "node:url";
 import { v4 as uuidv4 } from "uuid";
+
+dotenv.config({ path: ".env.local" });
 
 function safeLogConfig(config: SessionConfig): string {
   const safeConfig = { ...config, openaiApiKey: "[REDACTED]" };
@@ -30,7 +23,7 @@ export default defineAgent({
     const participant = await ctx.waitForParticipant();
 
     await runMultimodalAgent(ctx, participant);
-  },
+  }
 });
 
 type TurnDetectionType = {
@@ -56,40 +49,28 @@ function parseSessionConfig(data: any): SessionConfig {
     instructions: data.instructions || "",
     voice: data.voice || "",
     temperature: parseFloat(data.temperature || "0.8"),
-    maxOutputTokens:
-      data.max_output_tokens === "inf"
-        ? Infinity
-        : parseInt(data.max_output_tokens) || undefined,
+    maxOutputTokens: data.max_output_tokens === "inf" ? Infinity : parseInt(data.max_output_tokens) || undefined,
     modalities: modalitiesFromString(data.modalities || "text_and_audio"),
-    turnDetection: data.turn_detection ? JSON.parse(data.turn_detection) : null,
+    turnDetection: data.turn_detection ? JSON.parse(data.turn_detection) : null
   };
 }
 
-function modalitiesFromString(
-  modalities: string,
-): ["text", "audio"] | ["text"] {
+function modalitiesFromString(modalities: string): ["text", "audio"] | ["text"] {
   const modalitiesMap: { [key: string]: ["text", "audio"] | ["text"] } = {
     text_and_audio: ["text", "audio"],
-    text_only: ["text"],
+    text_only: ["text"]
   };
   return modalitiesMap[modalities] || ["text", "audio"];
 }
 
 function getMicrophoneTrackSid(participant: Participant): string | undefined {
-  return Array.from(participant.trackPublications.values()).find(
-    (track: TrackPublication) => track.source === TrackSource.SOURCE_MICROPHONE,
-  )?.sid;
+  return Array.from(participant.trackPublications.values()).find((track: TrackPublication) => track.source === TrackSource.SOURCE_MICROPHONE)?.sid;
 }
 
-async function runMultimodalAgent(
-  ctx: JobContext,
-  participant: RemoteParticipant,
-) {
+async function runMultimodalAgent(ctx: JobContext, participant: RemoteParticipant) {
   const metadata = JSON.parse(participant.metadata);
   const config = parseSessionConfig(metadata);
-  console.log(
-    `starting multimodal agent with config: ${safeLogConfig(config)}`,
-  );
+  console.log(`starting multimodal agent with config: ${safeLogConfig(config)}`);
 
   const model = new openai.realtime.RealtimeModel({
     apiKey: config.openaiApiKey,
@@ -98,13 +79,11 @@ async function runMultimodalAgent(
     temperature: config.temperature,
     maxResponseOutputTokens: config.maxOutputTokens,
     modalities: config.modalities as ["text", "audio"] | ["text"],
-    turnDetection: config.turnDetection,
+    turnDetection: config.turnDetection
   });
 
   const agent = new multimodal.MultimodalAgent({ model });
-  const session = (await agent.start(
-    ctx.room,
-  )) as openai.realtime.RealtimeSession;
+  const session = (await agent.start(ctx.room)) as openai.realtime.RealtimeSession;
 
   session.conversation.item.create({
     type: "message",
@@ -112,44 +91,31 @@ async function runMultimodalAgent(
     content: [
       {
         type: "input_text",
-        text: "Please begin the interaction with the user in a manner consistent with your instructions.",
-      },
-    ],
+        text: "Please begin the interaction with the user in a manner consistent with your instructions."
+      }
+    ]
   });
   session.response.create();
 
-  ctx.room.on(
-    "participantAttributesChanged",
-    (
-      changedAttributes: Record<string, string>,
-      changedParticipant: Participant,
-    ) => {
-      if (changedParticipant !== participant) {
-        return;
-      }
-      const newConfig = parseSessionConfig({
-        ...changedParticipant.attributes,
-        ...changedAttributes,
-      });
+  ctx.room.on("participantAttributesChanged", (changedAttributes: Record<string, string>, changedParticipant: Participant) => {
+    if (changedParticipant !== participant) {
+      return;
+    }
+    const newConfig = parseSessionConfig({
+      ...changedParticipant.attributes,
+      ...changedAttributes
+    });
 
-      session.sessionUpdate({
-        instructions: newConfig.instructions,
-        temperature: newConfig.temperature,
-        maxResponseOutputTokens: newConfig.maxOutputTokens,
-        modalities: newConfig.modalities as ["text", "audio"] | ["text"],
-        turnDetection: newConfig.turnDetection,
-      });
-    },
-  );
+    session.sessionUpdate({
+      instructions: newConfig.instructions,
+      temperature: newConfig.temperature,
+      maxResponseOutputTokens: newConfig.maxOutputTokens,
+      modalities: newConfig.modalities as ["text", "audio"] | ["text"],
+      turnDetection: newConfig.turnDetection
+    });
+  });
 
-  async function sendTranscription(
-    ctx: JobContext,
-    participant: Participant,
-    trackSid: string,
-    segmentId: string,
-    text: string,
-    isFinal: boolean = true,
-  ) {
+  async function sendTranscription(ctx: JobContext, participant: Participant, trackSid: string, segmentId: string, text: string, isFinal: boolean = true) {
     const transcription = {
       participantIdentity: participant.identity,
       trackSid: trackSid,
@@ -160,13 +126,11 @@ async function runMultimodalAgent(
           startTime: BigInt(0),
           endTime: BigInt(0),
           language: "",
-          final: isFinal,
-        },
-      ],
+          final: isFinal
+        }
+      ]
     };
-    await (ctx.room.localParticipant as LocalParticipant).publishTranscription(
-      transcription,
-    );
+    await (ctx.room.localParticipant as LocalParticipant).publishTranscription(transcription);
   }
 
   session.on("response_done", (response: openai.realtime.RealtimeResponse) => {
@@ -212,13 +176,7 @@ async function runMultimodalAgent(
     const trackSid = getMicrophoneTrackSid(localParticipant);
 
     if (trackSid) {
-      sendTranscription(
-        ctx,
-        localParticipant,
-        trackSid,
-        "status-" + uuidv4(),
-        message,
-      );
+      sendTranscription(ctx, localParticipant, trackSid, "status-" + uuidv4(), message);
     }
   });
 }

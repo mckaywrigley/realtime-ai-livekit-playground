@@ -15,6 +15,7 @@
   "devDependencies": {
     "@types/node": "^22.7.5",
     "@types/uuid": "^10.0.0",
+    "dotenv": "^16.4.5",
     "typescript": "^5.0.0"
   },
   "dependencies": {
